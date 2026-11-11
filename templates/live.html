@@ -1,0 +1,416 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="console-page">
+    <div class="dash">
+
+        <section class="card video-card">
+            <div class="card-head">
+                <div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3z"/></svg> Live Camera Monitoring</div>
+                <div class="chips"><span class="status-pill" id="cameraStatus">Camera inactive</span></div>
+            </div>
+            <div class="monitor" id="monitorFrame">
+                <div class="corner tl"></div><div class="corner tr"></div>
+                <div class="corner bl"></div><div class="corner br"></div>
+                <span class="live-tag">LIVE</span>
+                <div class="monitor-placeholder" id="placeholderText">FEED INACTIVE — CLICK START TO BEGIN</div>
+                <!-- The raw webcam is shown directly (smooth, no delay). Detections
+                     are drawn on the transparent canvas laid over it. -->
+                <video id="webcam" autoplay playsinline muted style="display:none;"></video>
+                <canvas id="overlay" style="position:absolute; inset:0; width:100%; height:100%; pointer-events:none; display:none;"></canvas>
+                <div class="hud" id="hud">
+                    <div class="hud-title" id="hudTitle">SENTRY ACTIVE</div>
+                    <div>State: <b id="hudState">MONITORING</b></div>
+                    <div>Alerts: <b id="hudAlerts">0</b> &nbsp;|&nbsp; FPS: <b id="hudFps">–</b></div>
+                </div>
+            </div>
+            <div class="card-foot">
+                <button class="btn btn-primary" onclick="startCamera()"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4l13 8-13 8z"/></svg>Start Live Monitoring</button>
+                <button class="btn btn-secondary" onclick="stopCamera()"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>Stop</button>
+                <button class="btn btn-secondary" id="soundToggle" onclick="toggleAlertSound()">Alarm: ON</button>
+            </div>
+        </section>
+
+        <aside class="side">
+            <div class="stat-grid">
+                <div class="kpi stat"><div class="stat-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l7-7"/><path d="M10 14l9.5-9.5a2 2 0 0 1 2.5 2.5L12.5 16.5z"/><path d="M8 16l-2-2"/></svg></div><div class="stat-text"><div class="stat-label">Weapon</div><span class="badge clear" id="weaponBadge">CLEAR</span></div></div>
+                <div class="kpi stat"><div class="stat-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></div><div class="stat-text"><div class="stat-label">Violence</div><span class="badge clear" id="violenceBadge">CLEAR</span></div></div>
+                <div class="kpi stat"><div class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16 14.2c2.9.2 5 2.6 5 5.8"/></svg></div><div class="stat-text"><div class="stat-label">Scene</div><span class="badge clear" id="sceneBadge">—</span></div></div>
+                <div class="kpi stat"><div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg></div><div class="stat-text"><div class="stat-label">Total alerts</div><div class="stat-value" id="totalCount">0</div></div></div>
+            </div>
+
+            <section class="card feed">
+                <div class="card-head">
+                    <div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Recent Incident Events</div>
+                    <div class="feed-counts"><span>Verified <b id="verifiedCount">0</b></span><span>False pos. <b id="fpCount">0</b></span></div>
+                </div>
+                <div class="terminal-log" id="incidentLog">No alerts yet.</div>
+                <div class="card-foot">
+                    <a class="btn btn-secondary" href="/api/report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>Download Report (CSV)</a>
+                </div>
+            </section>
+        </aside>
+    </div>
+
+    <div class="info-strip">
+        <div class="card info-card">
+            <h4>DETECTION DETAILS</h4>
+            <div class="info-line" id="violenceReason">Awaiting feed</div>
+            <div class="info-line" id="fpsStatus"></div>
+        </div>
+        <div class="card info-card" id="phonePanel" style="display:none;">
+            <h4>WATCH FROM PHONE</h4>
+            <div class="phone-row">
+                <div id="phoneQr"></div>
+                <div>
+                    <div class="info-line" style="margin-bottom:6px;">Same Wi-Fi: scan the code or open the link. Keep this page monitoring.</div>
+                    <div class="mono" id="phoneLink" style="font-size:0.72rem; overflow-wrap:anywhere; color:var(--safe);"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<canvas id="sendCanvas" style="display:none;"></canvas>
+
+<script>
+// Width of the frame sent for analysis. Starts at LIVE_SEND_WIDTH (480);
+// the server asks for wider frames (send_width) while the scene is
+// CROWDED, so small people and weapons keep enough pixels. What you SEE
+// is always the full-quality webcam.
+let sendWidth = 480;
+const JPEG_QUALITY = 0.7;
+
+let stream, videoEl, sendCanvas, sendCtx, overlay, overlayCtx, incidentPollId;
+let running = false;
+
+// Latest server result, redrawn on every animation frame so the
+// boxes stay aligned with the video even when the window resizes.
+let lastResult = null;
+
+// Previous alert state, so the alarm sounds once when a threat
+// appears rather than on every frame it stays on screen.
+let lastWeaponState = false;
+let lastViolenceState = false;
+
+// Analysis-rate readout.
+let framesDone = 0, fpsWindowStart = 0;
+
+function toggleAlertSound() {
+    window.alertSoundEnabled = !window.alertSoundEnabled;
+    document.getElementById('soundToggle').textContent =
+        'Alarm: ' + (window.alertSoundEnabled ? 'ON' : 'OFF');
+    if (window.alertSoundEnabled) window.unlockAlertSound();
+}
+
+async function startCamera() {
+    if (running) return;
+    const status = document.getElementById('cameraStatus');
+    try {
+        // This runs inside a click handler, which is the only place a
+        // browser will let us unlock audio playback.
+        window.unlockAlertSound();
+
+        videoEl = document.getElementById('webcam');
+        overlay = document.getElementById('overlay');
+        overlayCtx = overlay.getContext('2d');
+        sendCanvas = document.getElementById('sendCanvas');
+        sendCtx = sendCanvas.getContext('2d');
+        status.textContent = 'Requesting camera permission...';
+
+        await fetch('/api/reset_live_detection', { method: 'POST' });
+        lastWeaponState = false;
+        lastViolenceState = false;
+        lastResult = null;
+        sendWidth = 480;
+
+        stream = await navigator.mediaDevices.getUserMedia({
+            // 1280x720 when the camera has it, so there is detail to
+            // send in a crowded scene; normal scenes still send 480 px.
+            video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
+        });
+        videoEl.srcObject = stream;
+        await videoEl.play();
+
+        document.getElementById('placeholderText').style.display = 'none';
+        videoEl.style.display = 'block';
+        overlay.style.display = 'block';
+        status.textContent = 'Camera connected — analyzing live feed';
+        status.classList.add('live');
+        document.getElementById('monitorFrame').classList.add('is-live');
+
+        running = true;
+        framesDone = 0;
+        fpsWindowStart = performance.now();
+        analyseLoop();
+        requestAnimationFrame(drawOverlay);
+
+        refreshIncidents();
+        incidentPollId = setInterval(refreshIncidents, 3000);
+    } catch (error) {
+        status.textContent = 'Camera unavailable — allow browser camera access and try again';
+        document.getElementById('placeholderText').style.display = 'block';
+    }
+}
+
+function stopCamera() {
+    running = false;
+    if (stream) stream.getTracks().forEach(track => track.stop());
+    clearInterval(incidentPollId);
+    fetch('/api/reset_live_detection', { method: 'POST' });
+    document.getElementById('cameraStatus').textContent = 'Camera inactive';
+    document.getElementById('cameraStatus').classList.remove('live');
+    document.getElementById('monitorFrame').classList.remove('is-live');
+    document.getElementById('fpsStatus').textContent = '';
+    document.getElementById('placeholderText').style.display = 'block';
+    if (videoEl) videoEl.style.display = 'none';
+    if (overlay) overlay.style.display = 'none';
+    setBadge('weaponBadge', false, 'CLEAR');
+    setBadge('violenceBadge', false, 'CLEAR');
+    setScene('UNKNOWN', 0);
+    document.getElementById('violenceReason').textContent = 'Awaiting feed';
+    lastResult = null;
+    lastWeaponState = false;
+    lastViolenceState = false;
+}
+
+// Send a frame, wait for the answer, immediately send the next one.
+// No fixed timer: the loop runs exactly as fast as the server can
+// analyse, so requests never pile up (the old 250 ms timer both
+// limited the frame rate and let the feed fall behind).
+async function analyseLoop() {
+    while (running) {
+        if (!videoEl.videoWidth) { await sleep(50); continue; }
+
+        const scale = Math.min(1, sendWidth / videoEl.videoWidth);
+        sendCanvas.width = Math.round(videoEl.videoWidth * scale);
+        sendCanvas.height = Math.round(videoEl.videoHeight * scale);
+        sendCtx.drawImage(videoEl, 0, 0, sendCanvas.width, sendCanvas.height);
+
+        const dataUrl = sendCanvas.toDataURL('image/jpeg', JPEG_QUALITY);
+
+        try {
+            const res = await fetch('/api/detect_frame', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: dataUrl })
+            });
+            const data = await res.json();
+
+            if (!running) break;
+
+            if (data && !data.error && !data.skip) {
+                lastResult = data;
+                applyDetection(data);
+                updateFps(data.process_ms);
+            } else {
+                await sleep(30);
+            }
+        } catch (e) {
+            await sleep(300); // server restarting / network hiccup
+        }
+    }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function updateFps(processMs) {
+    framesDone++;
+    const elapsed = performance.now() - fpsWindowStart;
+    if (elapsed >= 1000) {
+        const fps = framesDone * 1000 / elapsed;
+        document.getElementById('fpsStatus').textContent =
+            `Analysing ${fps.toFixed(1)} frames/s · server ${processMs} ms/frame`;
+        document.getElementById('hudFps').textContent = fps.toFixed(1);
+        framesDone = 0;
+        fpsWindowStart = performance.now();
+    }
+}
+
+// Draw weapon boxes + alert banner over the live video.
+function drawOverlay() {
+    if (!running) {
+        if (overlayCtx) overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+        return;
+    }
+
+    const w = overlay.clientWidth, h = overlay.clientHeight;
+    if (overlay.width !== w || overlay.height !== h) {
+        overlay.width = w;
+        overlay.height = h;
+    }
+    overlayCtx.clearRect(0, 0, w, h);
+
+    if (lastResult && videoEl.videoWidth) {
+        // The video uses object-fit: contain, so work out where the
+        // picture actually sits inside the monitor box.
+        const vr = videoEl.videoWidth / videoEl.videoHeight;
+        let dw = w, dh = w / vr;
+        if (dh > h) { dh = h; dw = h * vr; }
+        const ox = (w - dw) / 2, oy = (h - dh) / 2;
+
+        overlayCtx.lineWidth = 3;
+        overlayCtx.font = 'bold 14px monospace';
+        (lastResult.boxes || []).forEach(b => {
+            const x = ox + b.x1 * dw, y = oy + b.y1 * dh;
+            const bw = (b.x2 - b.x1) * dw, bh = (b.y2 - b.y1) * dh;
+            overlayCtx.strokeStyle = '#ff3b30';
+            overlayCtx.strokeRect(x, y, bw, bh);
+            const label = `${b.name.toUpperCase()} ${Math.round(b.confidence * 100)}%`;
+            const ly = Math.max(y - 6, oy + 16);
+            overlayCtx.fillStyle = 'rgba(0,0,0,0.6)';
+            overlayCtx.fillRect(x, ly - 14, overlayCtx.measureText(label).width + 8, 18);
+            overlayCtx.fillStyle = '#ff3b30';
+            overlayCtx.fillText(label, x + 4, ly);
+        });
+
+        if (lastResult.alert) {
+            overlayCtx.fillStyle = 'rgba(200,0,0,0.75)';
+            overlayCtx.fillRect(ox, oy, dw, 40);
+            overlayCtx.fillStyle = '#fff';
+            overlayCtx.font = 'bold 20px monospace';
+            overlayCtx.fillText(lastResult.alert.trim(), ox + 14, oy + 27);
+        }
+    }
+
+    requestAnimationFrame(drawOverlay);
+}
+
+function applyDetection(data) {
+    const weapon = !!data.weapon_detected;
+    const violence = !!data.violence_detected;
+
+    const weaponName = data.weapon_label || 'WEAPON';
+    setBadge('weaponBadge', weapon, weapon ? weaponName : 'CLEAR');
+    setBadge('violenceBadge', violence, violence ? 'VIOLENCE' : 'CLEAR');
+    setScene(data.scene, data.people);
+    if (data.send_width) sendWidth = data.send_width;
+
+    // Status box on the video.
+    const threat = weapon || violence;
+    document.getElementById('hud').classList.toggle('threat', threat);
+    document.getElementById('hudTitle').textContent = threat ? 'THREAT DETECTED' : 'SENTRY ACTIVE';
+    document.getElementById('hudState').textContent =
+        weapon && violence ? weaponName + ' + VIOLENCE' : weapon ? weaponName : violence ? 'VIOLENCE' : 'MONITORING';
+
+    if (data.violence_reason) {
+        document.getElementById('violenceReason').textContent = data.violence_reason;
+    }
+
+    // Rising edge only: sound the alarm when a threat starts, not on
+    // every frame it stays on screen.
+    if (weapon && !lastWeaponState) {
+        window.playThreatAlert('weapon');
+    } else if (violence && !lastViolenceState) {
+        window.playThreatAlert('violence');
+    }
+
+    lastWeaponState = weapon;
+    lastViolenceState = violence;
+
+    if (data.new_incident_id) {
+        refreshIncidents();
+        // Emergency popup with the saved frame (see base.html).
+        window.openIncidentModal(data.new_incident_id);
+    }
+}
+
+function setBadge(id, isAlert, text) {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = 'badge ' + (isAlert ? 'alert' : 'clear');
+    // Light up the whole status card while a threat is on.
+    const card = el.closest('.kpi');
+    if (card) card.classList.toggle('is-alert', isAlert);
+}
+
+// ISOLATED / MODERATE / CROWDED and how many people are in view.
+function setScene(scene, people) {
+    const el = document.getElementById('sceneBadge');
+    if (!scene || scene === 'UNKNOWN') { el.textContent = '—'; el.className = 'badge clear'; return; }
+    el.textContent = `${scene} · ${people}`;
+    el.className = 'badge clear';
+}
+
+function refreshIncidents() {
+    fetch('/api/incidents/summary')
+        .then(res => res.json())
+        .then(s => {
+            document.getElementById('totalCount').textContent = s.total;
+            document.getElementById('hudAlerts').textContent = s.total;
+            document.getElementById('verifiedCount').textContent = s.verified;
+            document.getElementById('fpCount').textContent = s.false_positive;
+        })
+        .catch(() => {});
+
+    fetch('/api/incidents?limit=15')
+        .then(res => res.json())
+        .then(rows => {
+            const logBox = document.getElementById('incidentLog');
+            if (!rows.length) {
+                logBox.innerHTML = `<div class="empty-state">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>
+                    No incidents detected. System is actively monitoring.</div>`;
+                return;
+            }
+
+            logBox.innerHTML = rows.map(r => {
+                const time = new Date(r.timestamp + 'Z').toLocaleTimeString();
+                let statusLabel = 'Pending review';
+                if (r.verified) statusLabel = 'Verified threat';
+                if (r.false_positive) statusLabel = 'Dismissed (false positive)';
+
+                const done = r.verified || r.false_positive;
+                return `<div class="hit alert-row ${r.verified ? 'verified' : (r.false_positive ? 'done' : '')}">
+                    <div class="alert-top">
+                        <span class="alert-type">${r.detection_type.toUpperCase()}</span>
+                        <span class="alert-time">${time}</span>
+                    </div>
+                    <div class="alert-meta">${statusLabel}${r.scene ? ` · ${r.scene}` : ''}</div>
+                    <div class="alert-actions">
+                        ${!done ? `
+                            <button class="btn btn-secondary" onclick="verifyIncident(${r.id}, true)">Verify</button>
+                            <button class="btn btn-secondary" onclick="verifyIncident(${r.id}, false)">False positive</button>
+                        ` : ''}
+                        ${r.frame_url ? `<a href="${r.frame_url}" target="_blank">View frame</a>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        })
+        .catch(() => {});
+}
+
+function verifyIncident(id, isReal) {
+    fetch(`/api/incidents/${id}/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(isReal ? { verified: true } : { false_positive: true })
+    }).then(refreshIncidents);
+}
+
+// Phone link + QR code (only the laptop itself can fetch this).
+function showPhoneLink() {
+    fetch('/api/viewer_info')
+        .then(res => res.ok ? res.json() : null)
+        .then(info => {
+            if (!info || !info.lan_url) return;
+            document.getElementById('phonePanel').style.display = 'block';
+            document.getElementById('phoneLink').textContent = info.lan_url;
+
+            // QR code library from cdnjs; if the laptop is offline the
+            // link text above still works.
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+            script.onload = () => new QRCode(document.getElementById('phoneQr'), {
+                text: info.lan_url, width: 150, height: 150
+            });
+            script.onerror = () => { document.getElementById('phoneQr').style.display = 'none'; };
+            document.head.appendChild(script);
+        })
+        .catch(() => {});
+}
+
+// Show incident history even before the operator hits Start.
+refreshIncidents();
+showPhoneLink();
+</script>
+{% endblock %}

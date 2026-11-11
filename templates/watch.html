@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="console-page">
+    <div class="dash">
+
+        <section class="card video-card">
+            <div class="card-head">
+                <div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3z"/></svg> Remote Monitor</div>
+                <div class="chips"><span class="badge alert" id="onlineBadge">OFFLINE</span></div>
+            </div>
+            <div class="monitor">
+                <div class="corner tl"></div><div class="corner tr"></div>
+                <div class="corner bl"></div><div class="corner br"></div>
+                <img id="stream" alt="Laptop camera feed" style="display:none;">
+                <div class="monitor-placeholder" id="placeholderText">CONNECTING TO LAPTOP…</div>
+            </div>
+            <div class="card-foot">
+                <!-- Browsers only allow sound after a tap, so the alarm needs one tap here. -->
+                <button class="btn btn-primary" id="alarmBtn" style="width:100%; justify-content:center; padding:13px;" onclick="enableAlarm()">Tap to turn on alarm sound</button>
+            </div>
+        </section>
+
+        <aside class="side">
+            <div class="stat-grid">
+                <div class="kpi stat"><div class="stat-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l7-7"/><path d="M10 14l9.5-9.5a2 2 0 0 1 2.5 2.5L12.5 16.5z"/><path d="M8 16l-2-2"/></svg></div><div class="stat-text"><div class="stat-label">Weapon</div><span class="badge clear" id="weaponBadge">CLEAR</span></div></div>
+                <div class="kpi stat"><div class="stat-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg></div><div class="stat-text"><div class="stat-label">Violence</div><span class="badge clear" id="violenceBadge">CLEAR</span></div></div>
+                <div class="kpi stat"><div class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17.5" cy="9" r="2.5"/><path d="M16 14.2c2.9.2 5 2.6 5 5.8"/></svg></div><div class="stat-text"><div class="stat-label">Scene</div><span class="badge clear" id="sceneBadge">—</span></div></div>
+                <div class="kpi stat"><div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg></div><div class="stat-text"><div class="stat-label">Total alerts</div><div class="stat-value" id="totalCount">0</div></div></div>
+            </div>
+
+            <section class="card feed">
+                <div class="card-head">
+                    <div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> Recent Incident Events</div>
+                    <div class="feed-counts"><span>Verified <b id="verifiedCount">0</b></span><span>False pos. <b id="fpCount">0</b></span></div>
+                </div>
+                <div class="terminal-log" id="incidentLog">No alerts yet.</div>
+                <div class="card-foot">
+                    <a class="btn btn-secondary" href="/api/report"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>Download Report (CSV)</a>
+                </div>
+            </section>
+        </aside>
+    </div>
+
+    <div class="info-strip">
+        <div class="card info-card" style="grid-column: 1 / -1;">
+            <h4>DETECTION DETAILS</h4>
+            <div class="info-line" id="violenceReason">Waiting for laptop</div>
+        </div>
+    </div>
+</div>
+
+<script>
+const streamImg = document.getElementById('stream');
+
+let seq = -1;
+let alarmOn = false;
+let lastWeaponState = false;
+let lastViolenceState = false;
+let wakeLock = null;
+
+// Sound is off until the viewer taps once (browser rule), then the
+// same siren as the laptop plays on every new alert.
+function enableAlarm() {
+    alarmOn = !alarmOn;
+    window.alertSoundEnabled = alarmOn;
+    const btn = document.getElementById('alarmBtn');
+    if (alarmOn) {
+        window.unlockAlertSound();
+        btn.textContent = 'Alarm sound: ON (tap to mute)';
+        btn.className = 'btn btn-secondary';
+        keepScreenOn();
+    } else {
+        btn.textContent = 'Alarm sound: OFF (tap to turn on)';
+        btn.className = 'btn btn-primary';
+    }
+}
+
+// Keep the phone screen awake while watching. Browsers only allow
+// this on https (e.g. through a tunnel); on plain Wi-Fi http it is
+// silently skipped.
+async function keepScreenOn() {
+    try {
+        if ('wakeLock' in navigator && !wakeLock) {
+            wakeLock = await navigator.wakeLock.request('screen');
+            wakeLock.addEventListener('release', () => { wakeLock = null; });
+        }
+    } catch (e) { /* not allowed here -- fine */ }
+}
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && alarmOn) keepScreenOn();
+});
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Ask for "a frame newer than the one I have". The server holds the
+// request until one exists, so this runs at the laptop's frame rate.
+async function streamLoop() {
+    while (true) {
+        try {
+            const res = await fetch(`/api/watch/frame?after=${seq}`, { cache: 'no-store' });
+
+            if (res.status === 403) {
+                document.getElementById('placeholderText').textContent =
+                    'ACCESS KEY MISSING — OPEN THE LINK FROM THE LAPTOP AGAIN';
+                return;
+            }
+
+            const status = JSON.parse(res.headers.get('X-Sentry-Status') || '{}');
+            const blob = await res.blob();
+
+            const oldUrl = streamImg.src;
+            streamImg.src = URL.createObjectURL(blob);
+            if (oldUrl && oldUrl.startsWith('blob:')) URL.revokeObjectURL(oldUrl);
+
+            streamImg.style.display = 'block';
+            document.getElementById('placeholderText').style.display = 'none';
+
+            if (typeof status.seq === 'number') seq = status.seq;
+            applyStatus(status);
+        } catch (e) {
+            setBadge('onlineBadge', true, 'NO CONNECTION');
+            await sleep(1500);
+        }
+    }
+}
+
+function applyStatus(s) {
+    const online = !!s.online;
+    setBadge('onlineBadge', !online, online ? 'LIVE' : 'OFFLINE');
+
+    const weapon = online && !!s.weapon_detected;
+    const violence = online && !!s.violence_detected;
+
+    setBadge('weaponBadge', weapon, weapon ? (s.weapon_label || 'WEAPON') : 'CLEAR');
+    setBadge('violenceBadge', violence, violence ? 'VIOLENCE' : 'CLEAR');
+
+    const sceneEl = document.getElementById('sceneBadge');
+    sceneEl.textContent = (online && s.scene && s.scene !== 'UNKNOWN')
+        ? `${s.scene} · ${s.people}` : '—';
+
+    document.getElementById('violenceReason').textContent = online
+        ? (s.violence_reason || '')
+        : 'Laptop is not monitoring right now';
+
+    // Rising edge only: alarm when a threat starts.
+    if (weapon && !lastWeaponState) {
+        alertViewer('weapon');
+    } else if (violence && !lastViolenceState) {
+        alertViewer('violence');
+    }
+
+    lastWeaponState = weapon;
+    lastViolenceState = violence;
+
+    if (s.new_incident_id) {
+        refreshIncidents();
+        // Emergency popup with the saved frame (see base.html).
+        window.openIncidentModal(s.new_incident_id);
+    }
+}
+
+function alertViewer(kind) {
+    window.playThreatAlert(kind);
+    // Vibrate too (Android; iPhones ignore this).
+    if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]);
+}
+
+function setBadge(id, isAlert, text) {
+    const el = document.getElementById(id);
+    el.textContent = text;
+    el.className = 'badge ' + (isAlert ? 'alert' : 'clear');
+    // Light up the whole status card while a threat is on.
+    const card = el.closest('.kpi');
+    if (card && id !== 'onlineBadge') card.classList.toggle('is-alert', isAlert);
+}
+
+function refreshIncidents() {
+    fetch('/api/incidents/summary')
+        .then(res => res.json())
+        .then(s => {
+            document.getElementById('totalCount').textContent = s.total;
+            document.getElementById('verifiedCount').textContent = s.verified;
+            document.getElementById('fpCount').textContent = s.false_positive;
+        })
+        .catch(() => {});
+
+    fetch('/api/incidents?limit=15')
+        .then(res => res.json())
+        .then(rows => {
+            const logBox = document.getElementById('incidentLog');
+            if (!rows.length) {
+                logBox.innerHTML = `<div class="empty-state">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>
+                    No incidents detected. System is actively monitoring.</div>`;
+                return;
+            }
+
+            logBox.innerHTML = rows.map(r => {
+                const time = new Date(r.timestamp + 'Z').toLocaleTimeString();
+                let statusLabel = 'Pending review';
+                if (r.verified) statusLabel = 'Verified threat';
+                if (r.false_positive) statusLabel = 'Dismissed (false positive)';
+
+                const done = r.verified || r.false_positive;
+                return `<div class="hit alert-row ${r.verified ? 'verified' : (r.false_positive ? 'done' : '')}">
+                    <div class="alert-top">
+                        <span class="alert-type">${r.detection_type.toUpperCase()}</span>
+                        <span class="alert-time">${time}</span>
+                    </div>
+                    <div class="alert-meta">${statusLabel}${r.scene ? ` · ${r.scene}` : ''}</div>
+                    <div class="alert-actions">
+                        ${!done ? `
+                            <button class="btn btn-secondary" onclick="verifyIncident(${r.id}, true)">Verify</button>
+                            <button class="btn btn-secondary" onclick="verifyIncident(${r.id}, false)">False positive</button>
+                        ` : ''}
+                        ${r.frame_url ? `<a href="${r.frame_url}" target="_blank">View frame</a>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        })
+        .catch(() => {});
+}
+
+function verifyIncident(id, isReal) {
+    fetch(`/api/incidents/${id}/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(isReal ? { verified: true } : { false_positive: true })
+    }).then(refreshIncidents);
+}
+
+refreshIncidents();
+setInterval(refreshIncidents, 5000);
+streamLoop();
+</script>
+{% endblock %}

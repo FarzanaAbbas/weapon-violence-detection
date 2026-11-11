@@ -1,0 +1,347 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="console-page">
+    <div class="dash">
+
+        <section class="card video-card">
+            <div class="card-head">
+                <div class="card-title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>
+                    Footage Analysis
+                </div>
+                <div class="chips"><span class="status-pill" id="fileChip">No file selected</span></div>
+            </div>
+
+            <div class="monitor upload-monitor" id="monitorFrame">
+                <div class="corner tl"></div><div class="corner tr"></div>
+                <div class="corner bl"></div><div class="corner br"></div>
+
+                <!-- Drop zone (shown until a result is ready) -->
+                <div class="drop-zone" id="placeholderText">
+                    <div class="drop-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4.5 4.5 0 0 1-.5-9A6 6 0 0 1 18 8a4 4 0 0 1 0 8"/><path d="M12 12v8M9 15l3-3 3 3"/></svg>
+                    </div>
+                    <h3>Upload Video for Weapon &amp; Violence Analysis</h3>
+                    <p>Drag and drop a video or photo here, or browse.</p>
+                    <div class="format-chips"><span>MP4</span><span>AVI</span><span>MOV</span><span>MKV</span><span>WEBM</span><span>JPG</span><span>PNG</span></div>
+                    <input type="file" id="videoFile" accept="video/*,image/*" onchange="showSelectedFile()">
+                    <label class="file-picker" for="videoFile">Choose File</label>
+                    <div class="selected-file" id="selectedFile">No file selected</div>
+                </div>
+
+                <!-- Processing view with a live preview of analysed frames -->
+                <div class="processing" id="processingView" style="display:none;">
+                    <div class="proc-head">
+                        <div class="spinner"></div>
+                        <div>
+                            <div class="proc-title">Processing Video Feed…</div>
+                            <div class="proc-file" id="procFile"></div>
+                        </div>
+                    </div>
+                    <div class="progress" id="procBar"><span></span></div>
+                    <div class="info-line" id="procText">Starting…</div>
+                    <div class="preview-label">LIVE PROCESSING PREVIEW</div>
+                    <div class="preview-box"><img id="procPreview" alt="" style="display:none;"></div>
+                </div>
+
+                <video id="resultVideo" controls style="display:none;"></video>
+            </div>
+
+            <div class="card-foot">
+                <button class="btn btn-primary" onclick="uploadVideo()" id="analyzeBtn">Analyze File</button>
+                <button class="btn btn-secondary" onclick="clearUpload()">Clear</button>
+                <span class="info-line" style="margin-left:auto;">Video: weapon + violence &nbsp;·&nbsp; Image: weapon + violence &nbsp;·&nbsp; Both: scene</span>
+            </div>
+        </section>
+
+        <aside class="side">
+            <section class="card">
+                <div class="card-head">
+                    <div class="card-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+                        Status
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="info-line" id="statusText" style="font-size:0.8rem; color:var(--text);">Awaiting file</div>
+                    <div class="progress" id="progressBar" style="display:none; margin-top:10px;"><span></span></div>
+                    <div class="info-line" id="sceneText" style="margin-top:8px;"></div>
+                </div>
+            </section>
+
+            <section class="card feed">
+                <div class="card-head">
+                    <div class="card-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                        Detection Log
+                    </div>
+                </div>
+                <div class="terminal-log" id="logBox">No log yet.</div>
+            </section>
+        </aside>
+    </div>
+</div>
+
+<script>
+// Drag and drop onto the video area.
+(function () {
+    const frame = document.getElementById('monitorFrame');
+    const zone = document.getElementById('placeholderText');
+    ['dragenter', 'dragover'].forEach(ev => frame.addEventListener(ev, e => {
+        e.preventDefault(); zone.classList.add('drag');
+    }));
+    ['dragleave', 'drop'].forEach(ev => frame.addEventListener(ev, e => {
+        e.preventDefault(); zone.classList.remove('drag');
+    }));
+    frame.addEventListener('drop', e => {
+        if (!e.dataTransfer.files.length) return;
+        document.getElementById('videoFile').files = e.dataTransfer.files;
+        showSelectedFile();
+    });
+})();
+
+function showSelectedFile() {
+    const input = document.getElementById('videoFile');
+    const file = input.files.length ? input.files[0] : null;
+    document.getElementById('selectedFile').textContent = file ? file.name : 'No file selected';
+    document.getElementById('fileChip').textContent = file ? file.name : 'No file selected';
+
+    // Label the button for what was actually picked.
+    let label = 'Analyze File';
+    if (file && file.type.startsWith('image/')) label = 'Analyze Image';
+    else if (file && file.type.startsWith('video/')) label = 'Analyze Video';
+    document.getElementById('analyzeBtn').textContent = label;
+}
+
+function uploadVideo() {
+    const fileInput = document.getElementById('videoFile');
+    if (!fileInput.files.length) { alert('Please choose a video or image file first.'); return; }
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('video', file);
+
+    // Unlock audio here, inside the click handler, so the alarm can
+    // play when the scan finishes.
+    window.unlockAlertSound();
+
+    document.getElementById('statusText').textContent = 'Starting...';
+    document.getElementById('sceneText').textContent = '';
+
+    const bar = document.getElementById('progressBar');
+    bar.style.display = 'block';
+    bar.classList.add('busy');
+    bar.firstElementChild.style.width = '100%';
+    const startedAt = Date.now();
+
+    // Processing view over the video area (videos only; images are instant).
+    const isVideo = file.type.startsWith('video/');
+    const procView = document.getElementById('processingView');
+    const procBar = document.getElementById('procBar');
+    const procPreview = document.getElementById('procPreview');
+    document.getElementById('procFile').textContent = file.name;
+    document.getElementById('procText').textContent = 'Starting…';
+    procPreview.style.display = 'none';
+    procBar.classList.add('busy');
+    if (isVideo) {
+        document.getElementById('placeholderText').style.display = 'none';
+        document.getElementById('resultVideo').style.display = 'none';
+        const oldImg = document.getElementById('resultImage');
+        if (oldImg) oldImg.style.display = 'none';
+        procView.style.display = 'flex';
+    }
+
+    // Newest incident before this scan, so the popup afterwards shows
+    // an alert from THIS file.
+    let lastIdBefore = 0;
+    fetch('/api/incidents?limit=1').then(r => r.json())
+        .then(rows => { lastIdBefore = rows.length ? rows[0].id : 0; }).catch(() => {});
+
+    // Alerts already sounded while this file is being analysed.
+    let alertsHeard = 0;
+    // The analysis stops on each new alert until Resume is pressed in the
+    // popup. Paused time is left out of the "time left" estimate.
+    let popupForAlert = 0;
+    let pausedMs = 0;
+    let pauseStart = null;
+
+    const progressInterval = setInterval(() => {
+        fetch('/api/progress')
+        .then(res => res.json())
+        .then(p => {
+            // Siren the moment the server finds a threat during analysis.
+            if (p.active && p.alerts > alertsHeard) {
+                alertsHeard = p.alerts;
+                window.playThreatAlert(window.isWeaponAlert(p.last_alert) ? 'weapon' : 'violence');
+            }
+            if (p.active && p.paused && p.alerts !== popupForAlert) {
+                popupForAlert = p.alerts;
+                pauseStart = Date.now();
+                const pausedText = '⏸ Paused — ' + (p.last_alert || 'threat detected');
+                document.getElementById('statusText').textContent = pausedText;
+                document.getElementById('procText').textContent = pausedText;
+                const img = new Image();
+                img.onload = () => { procPreview.src = img.src; procPreview.style.display = 'block'; };
+                img.src = '/api/upload_preview?t=' + Date.now();
+                const resume = () => {
+                    if (pauseStart !== null) { pausedMs += Date.now() - pauseStart; pauseStart = null; }
+                    fetch('/api/upload_resume', { method: 'POST' }).catch(() => {});
+                };
+                if (p.alert_incident_id != null) window.openIncidentModal(p.alert_incident_id, { onClose: resume });
+                else resume();
+                return;
+            }
+            if (p.paused) return;
+            if (p.active && p.total > 0) {
+                const pct = Math.round((p.current / p.total) * 100);
+                // Time left, from how fast it has gone so far.
+                const elapsed = (Date.now() - startedAt - pausedMs) / 1000;
+                const left = p.current > 0 ? Math.max(0, Math.round(elapsed * (p.total - p.current) / p.current)) : null;
+                const text = `Processing frame ${p.current} of ${p.total} (${pct}%)` +
+                    (left !== null && pct >= 3 ? ` · about ${left}s left` : '');
+                document.getElementById('statusText').textContent = text;
+                document.getElementById('procText').textContent = text;
+                bar.classList.remove('busy');
+                bar.firstElementChild.style.width = pct + '%';
+                procBar.classList.remove('busy');
+                procBar.firstElementChild.style.width = pct + '%';
+                // Latest analysed frame, with its boxes.
+                if (isVideo) {
+                    const img = new Image();
+                    img.onload = () => { procPreview.src = img.src; procPreview.style.display = 'block'; };
+                    img.src = '/api/upload_preview?t=' + Date.now();
+                }
+            } else if (p.stage === 'encoding') {
+                document.getElementById('statusText').textContent = 'Preparing video for playback…';
+                document.getElementById('procText').textContent = 'Preparing video for playback…';
+                bar.classList.add('busy');
+                procBar.classList.add('busy');
+            }
+        });
+    }, 800);
+
+    fetch('/api/upload_video', { method: 'POST', body: formData })
+    .then(res => res.json())
+    .then(data => {
+        clearInterval(progressInterval);
+        bar.style.display = 'none';
+        procView.style.display = 'none';
+
+        if (data.error) {
+            document.getElementById('statusText').textContent = 'Error: ' + data.error;
+            document.getElementById('placeholderText').style.display = '';
+            return;
+        }
+
+        document.getElementById('statusText').textContent = data.is_image
+            ? `Image analyzed — ${data.alerts_log.length} alert(s) found.`
+            : `Processed ${data.total_frames} frames — ${data.alerts_log.length} alert(s) found.`;
+        document.getElementById('sceneText').textContent = data.scene_summary || '';
+
+        document.getElementById('placeholderText').style.display = 'none';
+
+        if (data.is_image) {
+            document.getElementById('resultVideo').style.display = 'none';
+            let resultImg = document.getElementById('resultImage');
+            if (!resultImg) {
+                resultImg = document.createElement('img');
+                resultImg.id = 'resultImage';
+                document.getElementById('monitorFrame').appendChild(resultImg);
+            }
+            resultImg.src = data.output_video;
+            resultImg.style.display = 'block';
+        } else {
+            const img = document.getElementById('resultImage');
+            if (img) img.style.display = 'none';
+            const resultVideo = document.getElementById('resultVideo');
+            // Drop the previous video's alert timings.
+            resultVideo.ontimeupdate = null;
+            resultVideo.onseeked = null;
+            resultVideo.src = data.output_video;
+            resultVideo.style.display = 'block';
+        }
+
+        const logBox = document.getElementById('logBox');
+        logBox.innerHTML = data.alerts_log.length
+            ? data.alerts_log.map(l => `<div class="hit">${l}</div>`).join('')
+            : `<div>No threats detected in this ${data.is_image ? 'image' : 'video'}.</div>`;
+
+        if (!data.is_image && data.alert_events && data.alert_events.length) {
+            // Video: play the result and raise each alert AT THE MOMENT it
+            // happens -- pause, siren, popup with that alert's frame; the
+            // popup's Resume (or closing it) continues the same video.
+            armVideoAlerts(document.getElementById('resultVideo'), data.alert_events);
+        } else if (data.alerts_log.length) {
+            // Image (or no timing info): alert straight away.
+            const weaponFound = data.alerts_log.some(l => window.isWeaponAlert(l));
+            window.playThreatAlert(weaponFound ? 'weapon' : 'violence');
+            fetch('/api/incidents?limit=50').then(r => r.json()).then(rows => {
+                const mine = rows.filter(r => r.id > lastIdBefore).sort((a, b) => a.id - b.id);
+                if (mine.length) window.showThreatModal(mine[0]);
+            }).catch(() => {});
+        }
+    })
+    .catch(() => {
+        clearInterval(progressInterval);
+        bar.style.display = 'none';
+        procView.style.display = 'none';
+        document.getElementById('placeholderText').style.display = '';
+    });
+}
+
+// Pause the result video when playback reaches each alert, sound the
+// siren and show that alert's popup; closing the popup resumes playback.
+// An alert shows once per pass; seeking back before it re-arms it.
+function armVideoAlerts(video, events) {
+    const shown = new Set();
+    let waiting = false;
+
+    video.ontimeupdate = () => {
+        if (waiting) return;
+        const t = video.currentTime;
+        for (let i = 0; i < events.length; i++) {
+            const e = events[i];
+            // Only fire near the alert's own moment (not when the user
+            // jumps far past it).
+            if (shown.has(i) || t < e.time || t > e.time + 1.5) continue;
+            shown.add(i);
+            waiting = true;
+            video.pause();
+            window.playThreatAlert(window.isWeaponAlert(e.text) ? 'weapon' : 'violence');
+            const resume = () => { waiting = false; video.play().catch(() => {}); };
+            const id = (e.incident_ids && e.incident_ids.length) ? e.incident_ids[0] : null;
+            if (id !== null) window.openIncidentModal(id, { onClose: resume });
+            else resume();
+            break;
+        }
+    };
+
+    video.onseeked = () => {
+        for (const i of Array.from(shown)) {
+            if (video.currentTime < events[i].time - 0.2) shown.delete(i);
+        }
+    };
+
+    video.play().catch(() => {});
+}
+
+function clearUpload() {
+    document.getElementById('videoFile').value = '';
+    document.getElementById('selectedFile').textContent = 'No file selected';
+    document.getElementById('fileChip').textContent = 'No file selected';
+    document.getElementById('analyzeBtn').textContent = 'Analyze File';
+    document.getElementById('placeholderText').style.display = '';
+    document.getElementById('processingView').style.display = 'none';
+    const rv = document.getElementById('resultVideo');
+    rv.style.display = 'none';
+    rv.pause();
+    rv.ontimeupdate = null;
+    rv.onseeked = null;
+    const img = document.getElementById('resultImage');
+    if (img) img.style.display = 'none';
+    document.getElementById('statusText').textContent = 'Awaiting file';
+    document.getElementById('sceneText').textContent = '';
+    document.getElementById('progressBar').style.display = 'none';
+    document.getElementById('logBox').innerHTML = 'No log yet.';
+}
+</script>
+{% endblock %}

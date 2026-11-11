@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="hero">
+    <div>
+        <div class="eyebrow">// REAL-TIME THREAT RECOGNITION</div>
+        <h1>See the threat before it escalates.</h1>
+        <p>Sentry watches video feeds continuously, flagging weapons and violent behaviour the moment they appear — so a human operator can act before harm happens, not after.</p>
+        <div class="hero-actions">
+            <a href="/live" class="btn btn-primary">Start Live Monitor</a>
+            <a href="/upload" class="btn btn-secondary">Analyze Footage</a>
+        </div>
+    </div>
+    <div class="radar-wrap">
+        <div class="radar">
+            <div class="radar-blip" style="top:35%; left:60%;"></div>
+        </div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-label">// PIPELINE</div>
+    <h2>How detection works</h2>
+    <div class="flow">
+        <div class="flow-step">
+            <div class="num">01 — CAPTURE</div>
+            <h3>Frame ingestion</h3>
+            <p>Live camera or uploaded footage is read frame by frame, in real time or on demand.</p>
+        </div>
+        <div class="flow-step">
+            <div class="num">02 — ANALYZE</div>
+            <h3>Dual-model inference</h3>
+            <p>Each frame runs through a weapon detector and a motion-based violence classifier in parallel.</p>
+        </div>
+        <div class="flow-step">
+            <div class="num">03 — ALERT</div>
+            <h3>Instant flagging</h3>
+            <p>Detections are overlaid on the feed immediately with a visible, timestamped alert.</p>
+        </div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-label">// SYSTEM MODULES</div>
+    <h2>What Sentry detects</h2>
+    <div class="modules">
+        <div class="module-card">
+            <div class="mod-tag">MODULE — WEAPON</div>
+            <h3>Weapon Detection</h3>
+            <p>A YOLOv8 object detector trained to localise pistols, knives, and rifles in a single frame with bounding boxes.</p>
+            <div class="specs">
+                <div class="spec"><div class="val">78.1%</div><div class="lbl">mAP@50</div></div>
+                <div class="spec"><div class="val">3</div><div class="lbl">CLASSES</div></div>
+                <div class="spec"><div class="val">6ms</div><div class="lbl">INFERENCE</div></div>
+            </div>
+        </div>
+        <div class="module-card">
+            <div class="mod-tag">MODULE — VIOLENCE</div>
+            <h3>Violence Recognition</h3>
+            <p>A ResNet50 + LSTM classifier that reads motion across a rolling window of frames to recognise violent behaviour.</p>
+            <div class="specs">
+                <div class="spec"><div class="val">95%</div><div class="lbl">ACCURACY</div></div>
+                <div class="spec"><div class="val">20</div><div class="lbl">FRAME WINDOW</div></div>
+                <div class="spec"><div class="val">2K</div><div class="lbl">TRAINING CLIPS</div></div>
+            </div>
+        </div>
+        <div class="module-card">
+            <div class="mod-tag">MODULE — POSE &amp; SCENE</div>
+            <h3>Neck Holds, Kicks &amp; Crowds</h3>
+            <p>A YOLOv8 pose model tracks each person's joints to catch a hand held on another person's neck or a kick aimed at someone, and counts people to label the scene isolated, moderate or crowded, with higher-resolution detection in crowds.</p>
+            <div class="specs">
+                <div class="spec"><div class="val">17</div><div class="lbl">KEYPOINTS</div></div>
+                <div class="spec"><div class="val">2</div><div class="lbl">ACTIONS</div></div>
+                <div class="spec"><div class="val">3</div><div class="lbl">SCENE LEVELS</div></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="disclaimer">
+    ⚠ Sentry is a decision-support tool, not a replacement for human judgement. Detections may include false positives and should always be verified by a human operator before action is taken.
+</div>
+
+{% endblock %}

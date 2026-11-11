@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Sentry — AI Threat Detection{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="console">
+        <div class="brand">
+            <div class="status-dot"></div>
+            <div>
+                <div class="brand-title">SENTRY</div>
+                <div class="brand-eyebrow">SURVEILLANCE INTELLIGENCE MODULE</div>
+            </div>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="{{ 'active' if active == 'home' else '' }}">HOME</a>
+            <a href="/live" class="{{ 'active' if active == 'live' else '' }}">LIVE MONITOR</a>
+            <a href="/upload" class="{{ 'active' if active == 'upload' else '' }}">UPLOAD & ANALYZE</a>
+        </div>
+    </nav>
+    {% block content %}{% endblock %}
+
+    <!-- ============================================================
+         EMERGENCY ALERT POPUP
+         Opens on every new incident (live, phone and upload pages)
+         with the saved frame, the details, and Verify / False
+         positive right there. window.openIncidentModal(id) shows
+         one incident; window.showThreatModal(row) shows a row from
+         /api/incidents.
+         ============================================================ -->
+    <div class="threat-modal" id="threatModal" role="dialog" aria-modal="true" aria-labelledby="tmTitle">
+        <div class="tm-card">
+            <button class="tm-close" onclick="closeThreatModal()" aria-label="Close">&times;</button>
+            <div class="tm-head">
+                <div class="tm-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5M12 18h.01"/></svg>
+                </div>
+                <div>
+                    <div class="tm-eyebrow">EMERGENCY ALERT TRIGGERED</div>
+                    <div class="tm-title" id="tmTitle">Threat detected! Please check immediately.</div>
+                </div>
+            </div>
+            <div class="tm-shot">
+                <img id="tmImg" alt="Captured alert frame">
+                <div class="tm-noimg" id="tmNoImg">No frame saved for this alert</div>
+                <span class="tm-tag">Captured alert frame</span>
+                <span class="tm-time" id="tmTime"></span>
+            </div>
+            <div class="tm-facts">
+                <div class="tm-fact"><div class="k">Alert type</div><div class="v red" id="tmType">—</div></div>
+                <div class="tm-fact"><div class="k">Source</div><div class="v" id="tmSource">—</div></div>
+                <div class="tm-fact"><div class="k">Confidence</div><div class="v" id="tmConf">—</div></div>
+                <div class="tm-fact"><div class="k">Scene</div><div class="v" id="tmScene">—</div></div>
+            </div>
+            <div class="tm-note" id="tmNote">Review the frame, then verify the threat or mark it as a false positive. It stays in Recent Alerts either way.</div>
+            <div class="tm-actions">
+                <a class="btn btn-secondary" id="tmDownload" download>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>Download Image</a>
+                <button class="btn btn-secondary" id="tmFalse">False positive</button>
+                <button class="btn btn-primary" id="tmVerify">Verify threat</button>
+                <button class="btn btn-secondary" id="tmResume" style="display:none;">&#9654; Resume video</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ============================================================
+    // ALERT SOUND
+    //
+    // Synthesised with the Web Audio API rather than played from an
+    // audio file: nothing extra to ship, nothing to preload, and no
+    // chance of the first alert being silent because an .mp3 hadn't
+    // finished downloading.
+    //
+    // Browsers refuse to play audio until the user has interacted
+    // with the page, so the audio context is created/resumed on the
+    // first click. Both alert paths start with a click ("Start Live
+    // Monitoring", "Analyze Video"), so the context is always
+    // unlocked before a detection can happen.
+    // ============================================================
+    (function () {
+
+        let audioCtx = null;
+        let lastPlayedAt = 0;
+
+        // Alerts repeat on every frame while a threat is on screen --
+        // the sound must not. Matches the siren length so two sirens
+        // never overlap.
+        const SIREN_SECONDS = 5;
+        const SOUND_COOLDOWN_MS = SIREN_SECONDS * 1000;
+
+        // Overall loudness (0..1). The compressor below keeps it from
+        // distorting at the top.
+        const SIREN_VOLUME = 0.95;
+
+        window.alertSoundEnabled = true;
+
+        // Alert text names the weapon ('KNIFE DETECTED!'), so check for
+        // any weapon word, not just 'WEAPON'.
+        window.isWeaponAlert = function (text) {
+            return /WEAPON|KNIFE|BLADE|PISTOL|GUN|FIREARM|RIFLE|GRENADE|MISSILE/.test(text || '');
+        };
+
+        function ensureContext() {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return null;
+            if (!audioCtx) audioCtx = new Ctx();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            return audioCtx;
+        }
+
+        // Call from a click handler to unlock audio up front.
+        window.unlockAlertSound = ensureContext;
+
+        // Loud emergency siren: two slightly detuned sawtooth waves plus a
+        // square wave an octave down, sweeping up and down in pitch, pushed
+        // through a compressor for maximum loudness without clipping.
+        //   weapon   -> fast "yelp" (rapid up/down, higher pitch)
+        //   violence -> classic "wail" (slow rise and fall)
+        function siren(ctx, kind) {
+            const start = ctx.currentTime;
+            const end = start + SIREN_SECONDS;
+
+            const yelp = kind === 'weapon';
+            const low = yelp ? 750 : 600;
+            const high = yelp ? 1600 : 1400;
+            const cycle = yelp ? 0.32 : 1.1;   // seconds per up+down sweep
+
+            const compressor = ctx.createDynamicsCompressor();
+            compressor.threshold.setValueAtTime(-18, start);
+            compressor.knee.setValueAtTime(6, start);
+            compressor.ratio.setValueAtTime(12, start);
+            compressor.attack.setValueAtTime(0.003, start);
+            compressor.release.setValueAtTime(0.1, start);
+
+            const master = ctx.createGain();
+            master.gain.setValueAtTime(0.0001, start);
+            master.gain.exponentialRampToValueAtTime(SIREN_VOLUME, start + 0.05);
+            master.gain.setValueAtTime(SIREN_VOLUME, end - 0.15);
+            master.gain.exponentialRampToValueAtTime(0.0001, end);
+
+            // Make-up gain after the compressor: brings the peak up to
+            // just under full scale (louder, still no clipping).
+            const boost = ctx.createGain();
+            boost.gain.setValueAtTime(1.4, start);
+
+            master.connect(compressor);
+            compressor.connect(boost);
+            boost.connect(ctx.destination);
+
+            const voices = [
+                { type: 'sawtooth', mult: 1.0, detune: -8, level: 0.55 },
+                { type: 'sawtooth', mult: 1.0, detune: 8, level: 0.55 },
+                { type: 'square', mult: 0.5, detune: 0, level: 0.35 },
+            ];
+
+            voices.forEach(v => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = v.type;
+                osc.detune.setValueAtTime(v.detune, start);
+                gain.gain.setValueAtTime(v.level, start);
+
+                // Pitch sweeps: low -> high -> low, repeated.
+                osc.frequency.setValueAtTime(low * v.mult, start);
+                for (let t = start; t < end; t += cycle) {
+                    osc.frequency.linearRampToValueAtTime(high * v.mult, Math.min(t + cycle / 2, end));
+                    osc.frequency.linearRampToValueAtTime(low * v.mult, Math.min(t + cycle, end));
+                }
+
+                osc.connect(gain);
+                gain.connect(master);
+                osc.start(start);
+                osc.stop(end + 0.05);
+            });
+        }
+
+        window.playThreatAlert = function (kind) {
+
+            if (!window.alertSoundEnabled) return;
+
+            const now = Date.now();
+            if (now - lastPlayedAt < SOUND_COOLDOWN_MS) return;
+
+            const ctx = ensureContext();
+            if (!ctx) return;
+
+            lastPlayedAt = now;
+
+            siren(ctx, kind);
+        };
+    })();
+    </script>
+    <script>
+    (function () {
+        const modal = document.getElementById('threatModal');
+        let currentId = null;
+        // Called once when the popup closes (any way) -- the upload page
+        // uses it to resume the paused result video.
+        let onClose = null;
+
+        function setText(id, text) { document.getElementById(id).textContent = text; }
+
+        window.showThreatModal = function (r, opts) {
+            if (!r) return;
+            currentId = r.id;
+            onClose = (opts && opts.onClose) || null;
+            document.getElementById('tmResume').style.display = onClose ? '' : 'none';
+            const type = (r.detection_type || 'threat').toUpperCase();
+            // 'WEAPON: KNIFE' -> 'Knife detected'
+            const weaponName = type.includes(':') ? type.split(':')[1].trim().toLowerCase() : '';
+            const label = type.startsWith('WEAPON')
+                ? (weaponName ? weaponName.charAt(0).toUpperCase() + weaponName.slice(1) + ' detected' : 'Weapon detected')
+                : type.includes('NECK') ? 'Neck hold detected'
+                : type.includes('KICK') ? 'Kick detected'
+                : 'Violence detected';
+            setText('tmTitle', `⚠ ${label}! Please check immediately.`);
+            setText('tmType', type);
+            setText('tmSource', r.source === 'live' ? 'Live camera' : (r.source || '—'));
+            setText('tmConf', r.confidence != null ? `${Math.round(r.confidence * 100)}%` : '—');
+            setText('tmScene', r.scene || '—');
+            setText('tmTime', r.timestamp ? new Date(r.timestamp + 'Z').toLocaleTimeString() : '');
+
+            const img = document.getElementById('tmImg');
+            const dl = document.getElementById('tmDownload');
+            if (r.frame_url) {
+                img.src = r.frame_url + '?t=' + Date.now();
+                img.style.display = 'block';
+                document.getElementById('tmNoImg').style.display = 'none';
+                dl.href = r.frame_url;
+                dl.setAttribute('download', `alert_${r.id}.jpg`);
+                dl.style.display = '';
+            } else {
+                img.style.display = 'none';
+                document.getElementById('tmNoImg').style.display = 'block';
+                dl.style.display = 'none';
+            }
+
+            const reviewed = r.verified || r.false_positive;
+            document.getElementById('tmVerify').style.display = reviewed ? 'none' : '';
+            document.getElementById('tmFalse').style.display = reviewed ? 'none' : '';
+
+            modal.classList.add('open');
+        };
+
+        window.openIncidentModal = function (id, opts) {
+            fetch('/api/incidents?limit=200')
+                .then(res => res.json())
+                .then(rows => {
+                    const row = rows.find(r => r.id === id) || rows[0];
+                    window.showThreatModal(row, opts);
+                })
+                .catch(() => { if (opts && opts.onClose) opts.onClose(); });
+        };
+
+        window.closeThreatModal = function () {
+            modal.classList.remove('open');
+            const cb = onClose;
+            onClose = null;
+            if (cb) cb();
+        };
+
+        function review(isReal) {
+            if (currentId == null) return;
+            fetch(`/api/incidents/${currentId}/verify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(isReal ? { verified: true } : { false_positive: true })
+            }).then(() => {
+                window.closeThreatModal();
+                if (typeof window.refreshIncidents === 'function') window.refreshIncidents();
+            });
+        }
+
+        document.getElementById('tmVerify').onclick = () => review(true);
+        document.getElementById('tmResume').onclick = () => window.closeThreatModal();
+        document.getElementById('tmFalse').onclick = () => review(false);
+        modal.addEventListener('click', e => { if (e.target === modal) window.closeThreatModal(); });
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') window.closeThreatModal(); });
+    })();
+    </script>
+</body>
+</html>

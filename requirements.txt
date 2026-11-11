@@ -1,0 +1,6 @@
+flask
+ultralytics
+tensorflow
+opencv-python
+numpy
+imageio-ffmpeg

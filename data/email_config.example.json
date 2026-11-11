@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "to": ["receiver@example.com"],
+  "smtp_host": "smtp.gmail.com",
+  "smtp_port": 587,
+  "username": "your-sender@gmail.com",
+  "app_password": "your 16-character Gmail app password",
+  "min_seconds_between_emails": 60
+}
